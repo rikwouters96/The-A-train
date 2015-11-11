@@ -27,11 +27,11 @@
 #include <Wire.h>
 
 // Pin definitions: 
-int PIN_IR_DECODER_VT = 1;
-int PIN_IR_DECODER_D1 = 10;                           // most significant bit
+int PIN_IR_DECODER_VT = 1;                            // this pin jumps high when a beacon is correctly registered.
+int PIN_IR_DECODER_D1 = 10;                           // most significant bit.
 int PIN_IR_DECODER_D2 = 11;
 int PIN_IR_DECODER_D3 = 8;
-int PIN_IR_DECODER_D4 = A0;                           // least significant bit
+int PIN_IR_DECODER_D4 = A0;                           // least significant bit.
 int PIN_EMERGENCY_MOTOR = 0;
 int PIN_EMERGENCY_COMMUNICATION = 7; 
 
@@ -136,10 +136,10 @@ void setup() {
 // This means we can listen almost continuously for messages from CCE and react as quickly as possible.
 void loop() {
   
-  if (emergency_situation == true) {
-    emergency_situation_start_time = millis();
-    Serial.println("Emergency situation!");
-    Serial.println("...Send any character to end emergency situation");
+  if (emergency_situation == true) {                                                     // in case of emergency:
+    emergency_situation_start_time = millis();                                           
+    Serial.println("Emergency situation!");                                              // next lines of code keep the train in emergency mode until it serially receives a character from the pc.
+    Serial.println("...Send any character to end emergency situation");                  // this is a temporary solution and it will be changed when the communication with CCE is added. 
     while (Serial.available() && Serial.read());                                         // empty serial buffer.
     while (!Serial.available()) {                                                        // wait for serial input.
       delay(1000);
@@ -147,8 +147,8 @@ void loop() {
     while (Serial.available() && Serial.read());                                         // empty buffer again.
     Serial.println("Emergency situation ended"); 
     if (current_location == TERMINAL_ARRIVAL || current_location == TERMINAL_INTERNATIONAL_ARRIVAL) {
-      emergency_situation_duration = millis() - emergency_situation_start_time;
-      }
+      emergency_situation_duration = millis() - emergency_situation_start_time;          // if the state of emergency is called while arriving a terminal, save the duration to correct the terminal stop time.
+      }                                                                                  
     }
   
   
@@ -164,7 +164,7 @@ void loop() {
     else if (current_location == TERMINAL_ARRIVAL || current_location == TERMINAL_INTERNATIONAL_ARRIVAL) {
       motor_power = SLOW_SPEED;
       send_comfort_arrival();
-      emergency_situation_duration = 0;
+      emergency_situation_duration = 0;                                                  // just arriving a terminal: reset the emergency_situation_duration.
       terminal_beacon_passed_time = millis();
       }
     else if (current_location == TERMINAL) {
@@ -224,7 +224,7 @@ void loop() {
       doors_opened = true;
       doors_closing_time = current_time + terminal_waiting_time;                           // and update doors_closing_time.
       }
-    else {
+    else {                                                                                 // If the doors must not be opened yet, wait.
       delay(10);
       }
     }    
@@ -247,7 +247,7 @@ void loop() {
       doors_opened = true;
       doors_closing_time = current_time + terminal_international_waiting_time;          // and update doors_closing_time.
       }
-    else {
+    else {                                                                              // If the doors must not be opened yet, wait.
       delay(10);
       }    
     }
@@ -266,18 +266,18 @@ void loop() {
 // ===                  INTERRUPT FUNCTIONS                     ===
 // ================================================================
 // Interrupt functions must be as fast as possible. 
-void decoder_interrupt() {
-  if (beacon_ticks > 0) return;
+void decoder_interrupt() {                                                              // the interrupt function to be called when the VT-pin from the decoder goes high.
+  if (beacon_ticks > 0) return;                                                         // don't register beacons if beacon_ticks is not zero.
   
   Serial.println("Beacon registered!");
   
-  ir_decoder_d1 = digitalRead(PIN_IR_DECODER_D1);
+  ir_decoder_d1 = digitalRead(PIN_IR_DECODER_D1);                                       // read IR decoder pins.
   ir_decoder_d2 = digitalRead(PIN_IR_DECODER_D2);
   ir_decoder_d3 = digitalRead(PIN_IR_DECODER_D3);
   ir_decoder_d4 = digitalRead(PIN_IR_DECODER_D4);
   
-  beacon = 8*ir_decoder_d1 + 4*ir_decoder_d2 + 2*ir_decoder_d3 + 1*ir_decoder_d4; 
-  beacon_type = beacon_number_to_type[beacon]; 
+  beacon = 8*ir_decoder_d1 + 4*ir_decoder_d2 + 2*ir_decoder_d3 + 1*ir_decoder_d4;       // convert readings to the corresponding binary number.
+  beacon_type = beacon_number_to_type[beacon];                                          // check the beacon type corresponding with this beacon number.
   
   if ((current_location == TERMINAL_DEPARTURE && beacon_type == TERMINAL)
       || (current_location == TERMINAL_INTERNATIONAL_DEPARTURE && beacon_type == TERMINAL_INTERNATIONAL)) {                                       
@@ -300,7 +300,7 @@ void decoder_interrupt() {
   }
 
 
-void emergency_interrupt() {
+void emergency_interrupt() {                                                            // the interrupt function to be called when the emergency pin from MOTOR goes high.
   emergency_situation = true;
   // send_emergency_message_to_CCE();  
   digitalWrite(PIN_EMERGENCY_COMMUNICATION, HIGH); 
