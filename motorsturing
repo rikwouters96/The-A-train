@@ -52,11 +52,33 @@
   int spanning_bots_voor;
   int spanning_bots_achter;
   
+  boolean noodtoestand = 0;
+  
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////
+/// Noodtoestand-interrupt ////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    
+void emergencySignal()
+{
+  if (digitalRead(PIN_EM_IN) == HIGH){
+    noodtoestand = 1;
+    digitalWrite(PIN_MOTOR_1, LOW);
+    digitalWrite(PIN_MOTOR_2, LOW);
+  }
+  else {
+    noodtoestand = 0;
+  }
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 void setup() {
   pinMode(PIN_SPEED, INPUT);
   pinMode(PIN_COLLISION, INPUT);
   pinMode(PIN_EM_OUT, OUTPUT);
+
   pinMode(PIN_EM_IN, INPUT);
   pinMode(PIN_MOTOR_1, OUTPUT);
   pinMode(PIN_MOTOR_2, OUTPUT);
@@ -66,6 +88,9 @@ void setup() {
   // Communicatie
   Wire.begin(I2C_ADDRESS);      // join i2c bus with address #2
   Wire.onReceive(receiveEvent); // register event = Communicatie info uitlezen  
+  
+  // Noodtoestand 
+  attachInterrupt(digitalPinToInterrupt(PIN_EM_IN), emergencySignal, CHANGE);
 }
   
 void loop() {
@@ -74,8 +99,11 @@ void loop() {
   
   // Aflezen snelheidssensor
   meetSensoren();
- 
-  snelheidAanpassen(snelheid_mps, gewenste_snelheid);
+  noodtoestandControle();
+  
+  if (noodtoestand == 0){
+    snelheidAanpassen(snelheid_mps, gewenste_snelheid);
+  }`
   
   // Als we voor het LCD een schaal vaal 0.5m/s nemem, en bv 10m/s uitbeelden 
   // met een snelheid tussen 9.6m/s en 10.4m/s dan zal de snelheid op het 
@@ -148,6 +176,34 @@ int meetSensoren(){
   }
   return snelheid_rpm && snelheid_mps && snelheid_pwm && botsing_voor && botsing_achter ;
 }
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////
+/// Noodtoestand Controle /////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+void noodtoestandControle(){
+  
+  if ((botsing_voor == true) && (botsing_achter == false) && (richting == 0)){
+    noodtoestand = 1;
+    digitalWrite(PIN_MOTOR_1, LOW);
+    digitalWrite(PIN_EM_OUT, HIGH);
+  }
+  else if ((botsing_voor == false) && (botsing_achter == true) && (richting == 1)){
+    noodtoestand = 1;
+    digitalWrite(PIN_MOTOR_2, LOW);
+    digitalWrite(PIN_EM_OUT, HIGH);
+  }
+  else if ((botsing_voor == true) && (botsing_achter == true)){
+    noodtoestand = 1;
+    digitalWrite(PIN_MOTOR_1, LOW);
+    digitalWrite(PIN_MOTOR_2, LOW);
+    digitalWrite(PIN_EM_OUT, HIGH);
+  }
+  else if ((botsing_voor == false) && (botsing_achter == false)){
+    noodtoestand = 0;
+    digitalWrite(PIN_EM_OUT, LOW); 
+  }
+}  
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /// Eenheden omzetten /////////////////////////////////////////////////////////////////////////////////////////
@@ -235,4 +291,6 @@ void snelheid_sturen(int snelheid_mps){
  ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
  ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
    
+  
+  
   
