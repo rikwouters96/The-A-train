@@ -30,18 +30,18 @@
   byte terminal; // 0 = Nationaal Terminal, 1 = Internationaal Terminal
   
   // Snelheden
-  boolean richting;   // 0 = vooruit, 1 = achteruit 
+  boolean richting = 0;   // 0 = vooruit, 1 = achteruit 
   byte gewenste_snelheid;  // in mps
   byte gewenste_snelheid_comm;  // 0-255
-  int snelheid_mps;
-  int snelheid_rpm;
-  int snelheid_pwm;
+  float snelheid_mps;
+  float snelheid_rpm;
+  float snelheid_pwm;
   
   //Constanten
   float OMTREK_WIEL = 0.115;
   int MAX_RPM = 500; //// Aan te passen na meting !!!!!!!!!!! ////
   int MAX_PWM = 1024;
-  int MAX_MPS = (0.115 * (MAX_RPM / 60));
+  float MAX_MPS = (0.115 * (MAX_RPM / 60));
   int MAX_SPEED = 255;
   
   // Sensorwaarden
@@ -49,8 +49,8 @@
   int bots_sensor;
   boolean botsing_voor; 
   boolean botsing_achter;
-  int spanning_bots_voor;
-  int spanning_bots_achter;
+  int spanning_bots_voor = 400;
+  int spanning_bots_achter = 220;
   
   boolean noodtoestand = 0;
   
@@ -85,25 +85,28 @@ void setup() {
 
   Serial.begin(9600); //Communication with LCD
 
-  // Communicatie
-  Wire.begin(I2C_ADDRESS);      // join i2c bus with address #2
-  Wire.onReceive(receiveEvent); // register event = Communicatie info uitlezen  
-  
+//  // Communicatie
+//  Wire.begin(I2C_ADDRESS);      // join i2c bus with address #2
+//  Wire.onReceive(receiveEvent); // register event = Communicatie info uitlezen  
+//  
   // Noodtoestand 
   attachInterrupt(digitalPinToInterrupt(PIN_EM_IN), emergencySignal, CHANGE);
 }
   
 void loop() {
   
-  gewenste_snelheid = commSpeedToMps(gewenste_snelheid_comm); // gewenste_snelheid_comm omzetten in m/s waarde. 
-  
+  //gewenste_snelheid = commSpeedToMps(gewenste_snelheid_comm); // gewenste_snelheid_comm omzetten in m/s waarde. 
+  gewenste_snelheid = commSpeedToMps(128);
+  //Serial.print(gewenste_snelheid);
   // Aflezen snelheidssensor
   meetSensoren();
   noodtoestandControle();
   
+  Serial.println(noodtoestand);
+  delay(1000);
   if (noodtoestand == 0){
     snelheidAanpassen(snelheid_mps, gewenste_snelheid);
-  }`
+  }
   
   // Als we voor het LCD een schaal vaal 0.5m/s nemem, en bv 10m/s uitbeelden 
   // met een snelheid tussen 9.6m/s en 10.4m/s dan zal de snelheid op het 
@@ -149,12 +152,12 @@ int meetSensoren(){
   
   // Botsingsensor 
   bots_sensor = analogRead(PIN_COLLISION);
-  if (bots_sensor >= 4.5) {
+  if (bots_sensor >= 1000) {
     botsing_voor = false;
     botsing_achter = false;
   }
   
-  else if (bots_sensor < 4.5 )
+  else if (bots_sensor < 1000 )
   {
     if (bots_sensor >= spanning_bots_voor) {
     botsing_voor = true ;
@@ -184,19 +187,21 @@ int meetSensoren(){
 void noodtoestandControle(){
   
   if ((botsing_voor == true) && (botsing_achter == false) && (richting == 0)){
+    Serial.println("A");
     noodtoestand = 1;
-    digitalWrite(PIN_MOTOR_1, LOW);
+    analogWrite(PIN_MOTOR_1, 0);
     digitalWrite(PIN_EM_OUT, HIGH);
   }
   else if ((botsing_voor == false) && (botsing_achter == true) && (richting == 1)){
+    Serial.println("B");
     noodtoestand = 1;
-    digitalWrite(PIN_MOTOR_2, LOW);
+    analogWrite(PIN_MOTOR_2, 0);
     digitalWrite(PIN_EM_OUT, HIGH);
   }
   else if ((botsing_voor == true) && (botsing_achter == true)){
     noodtoestand = 1;
-    digitalWrite(PIN_MOTOR_1, LOW);
-    digitalWrite(PIN_MOTOR_2, LOW);
+    analogWrite(PIN_MOTOR_1, 0);
+    analogWrite(PIN_MOTOR_2, 0);
     digitalWrite(PIN_EM_OUT, HIGH);
   }
   else if ((botsing_voor == false) && (botsing_achter == false)){
@@ -218,6 +223,7 @@ int mpsToPwm(int snelheid_mps){
 int commSpeedToMps(byte gewenste_snelheid_comm) {
  
   snelheid_mps = (gewenste_snelheid_comm * MAX_MPS) / MAX_SPEED ;
+  Serial.println(snelheid_mps);
   return snelheid_mps ;  
 }
 
@@ -275,22 +281,26 @@ void snelheid_sturen(int snelheid_mps){
  ///Communicatie////////////////////////////////////////////////////////////////////////////////////////////////
  ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
  
- void receiveEvent(int howMany){
-   if (Wire.available() == 3) {
-     richting = Wire.read();
-     gewenste_snelheid_comm = Wire.read();
-     terminal = Wire.read();
-   }
-   else if (Wire.available() == 2) {
-     richting = Wire.read();
-     gewenste_snelheid_comm = Wire.read();
-   }
- }
+// void receiveEvent(int howMany){
+//   if (Wire.available() == 3) {
+//     richting = Wire.read();
+//     gewenste_snelheid_comm = Wire.read();
+//     terminal = Wire.read();
+//   }
+//   else if (Wire.available() == 2) {
+//     richting = Wire.read();
+//     gewenste_snelheid_comm = Wire.read();
+//   }
+// }
  
  ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
  ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
  ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
    
+  
+  
+  
+  
   
   
   
