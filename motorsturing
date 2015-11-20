@@ -1,5 +1,6 @@
 #include <Wire.h>
- 
+#include "P&O3.h"
+
  //******Pin allocation************
 
  //Sensors
@@ -21,43 +22,43 @@
  byte PIN_LCD = 1;
 
  byte I2C_ADDRESS = 2;
- 
+
  //******Variables************
 
- 
-  
+
+
   // Terminals
   byte terminal; // 0 = Nationaal Terminal, 1 = Internationaal Terminal
-  
+
   // Snelheden
-  boolean richting = 0;   // 0 = vooruit, 1 = achteruit 
+  boolean richting = 0;   // 0 = vooruit, 1 = achteruit
   byte gewenste_snelheid;  // in mps
   byte gewenste_snelheid_comm;  // 0-255
   float snelheid_mps;
   float snelheid_rpm;
   float snelheid_pwm;
-  
+
   //Constanten
   float OMTREK_WIEL = 0.115;
   int MAX_RPM = 500; //// Aan te passen na meting !!!!!!!!!!! ////
   int MAX_PWM = 1024;
   float MAX_MPS = (0.115 * (MAX_RPM / 60));
   int MAX_SPEED = 255;
-  
+
   // Sensorwaarden
   int snelheid_sensor_volt;
   int bots_sensor;
-  boolean botsing_voor; 
+  boolean botsing_voor;
   boolean botsing_achter;
   int spanning_bots_voor = 400;
   int spanning_bots_achter = 220;
-  
+
   boolean noodtoestand = 0;
-  
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /// Noodtoestand-interrupt ////////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    
+
 void emergencySignal()
 {
   if (digitalRead(PIN_EM_IN) == HIGH){
@@ -74,50 +75,11 @@ void emergencySignal()
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-void setup() {
-  pinMode(PIN_SPEED, INPUT);
-  pinMode(PIN_COLLISION, INPUT);
-  pinMode(PIN_EM_OUT, OUTPUT);
-
-  pinMode(PIN_EM_IN, INPUT);
-  pinMode(PIN_MOTOR_1, OUTPUT);
-  pinMode(PIN_MOTOR_2, OUTPUT);
-
-  Serial.begin(9600); //Communication with LCD
-
-//  // Communicatie
-//  Wire.begin(I2C_ADDRESS);      // join i2c bus with address #2
-//  Wire.onReceive(receiveEvent); // register event = Communicatie info uitlezen  
-//  
-  // Noodtoestand 
-  attachInterrupt(digitalPinToInterrupt(PIN_EM_IN), emergencySignal, CHANGE);
-}
-  
-void loop() {
-  
-  //gewenste_snelheid = commSpeedToMps(gewenste_snelheid_comm); // gewenste_snelheid_comm omzetten in m/s waarde. 
-  gewenste_snelheid = commSpeedToMps(128);
-  //Serial.print(gewenste_snelheid);
-  // Aflezen snelheidssensor
-  meetSensoren();
-  noodtoestandControle();
-  
-  Serial.println(noodtoestand);
-  delay(1000);
-  if (noodtoestand == 0){
-    snelheidAanpassen(snelheid_mps, gewenste_snelheid);
-  }
-  
-  // Als we voor het LCD een schaal vaal 0.5m/s nemem, en bv 10m/s uitbeelden 
-  // met een snelheid tussen 9.6m/s en 10.4m/s dan zal de snelheid op het 
-  // LCD niet moeten veranderen elke keer we een kleine aanpassing doen. 
- 
-}
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /// Hulpfunties ///////////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
-  
+
   ///////////////////////////////////////////////////////////////////////
   // snelheid in m/s bekom je met 0.115 * (RPM / 60)                   //
   ///////////////////////////////////////////////////////////////////////
@@ -129,7 +91,7 @@ void loop() {
   // !!!!! Formule nodig voor RPM -> PWM !!!!!                         //
   // RPM tussen 0-?? (nog te meten) = x // PWM tussen 0-1024 en y=1024 //
   // Lineair verband                                                   //
-  // PWM = (xy/??) = (huidige_RPM * max_PWM) / max_RPM                 // 
+  // PWM = (xy/??) = (huidige_RPM * max_PWM) / max_RPM                 //
   // Moet getest worden.                                               //
   ///////////////////////////////////////////////////////////////////////
   // !!!!! Formule nodig voor Spanning -> RPM !!!!!                    //
@@ -144,33 +106,33 @@ void loop() {
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 int meetSensoren(){
-  // Snelheidsensor 
+  // Snelheidsensor
   snelheid_sensor_volt = analogRead(PIN_SPEED);
   snelheid_rpm = (snelheid_sensor_volt * MAX_RPM) / 5 ;
   snelheid_pwm = (snelheid_rpm * MAX_PWM) / MAX_RPM;
   snelheid_mps = OMTREK_WIEL * (snelheid_rpm / 60) ;
-  
-  // Botsingsensor 
+
+  // Botsingsensor
   bots_sensor = analogRead(PIN_COLLISION);
   if (bots_sensor >= 1000) {
     botsing_voor = false;
     botsing_achter = false;
   }
-  
+
   else if (bots_sensor < 1000 )
   {
     if (bots_sensor >= spanning_bots_voor) {
     botsing_voor = true ;
     botsing_achter = false ;
     }
-    
+
     else if (bots_sensor < spanning_bots_voor) {
-      
+
       if (bots_sensor >= spanning_bots_achter) {
       botsing_voor = false ;
       botsing_achter = true ;
       }
-      
+
       else {
       botsing_voor = true ;
       botsing_achter = true ;
@@ -185,7 +147,7 @@ int meetSensoren(){
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 void noodtoestandControle(){
-  
+
   if ((botsing_voor == true) && (botsing_achter == false) && (richting == 0)){
     Serial.println("A");
     noodtoestand = 1;
@@ -206,81 +168,81 @@ void noodtoestandControle(){
   }
   else if ((botsing_voor == false) && (botsing_achter == false)){
     noodtoestand = 0;
-    digitalWrite(PIN_EM_OUT, LOW); 
+    digitalWrite(PIN_EM_OUT, LOW);
   }
-}  
+}
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /// Eenheden omzetten /////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 int mpsToPwm(int snelheid_mps){
-  
+
   snelheid_rpm = (snelheid_mps*60)/OMTREK_WIEL ;
   return snelheid_pwm = (snelheid_rpm*MAX_PWM)/MAX_RPM ;
 }
 
 int commSpeedToMps(byte gewenste_snelheid_comm) {
- 
+
   snelheid_mps = (gewenste_snelheid_comm * MAX_MPS) / MAX_SPEED ;
   Serial.println(snelheid_mps);
-  return snelheid_mps ;  
+  return snelheid_mps ;
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ///Snelheid aanpassen//////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-void snelheidAanpassen(int snelheid_mps, int gewenste_snelheid) {
-  
-  if (gewenste_snelheid == 0){
-    analogWrite(PIN_MOTOR_1, 0) ; 
-    analogWrite(PIN_MOTOR_2, 0) ;
-  }
-  
-  else if ((snelheid_mps > (gewenste_snelheid - 0.2)) && (snelheid_mps < (gewenste_snelheid + 0.2)))
-  {
-  }
-  
-  else if (snelheid_mps > gewenste_snelheid + 0.1) // In m/s  
-  {
-    snelheid_mps = gewenste_snelheid ; // Onmiddelijk veranderen naar gewenste_snelheid
-    snelheid_sturen(snelheid_mps) ;
-  }
-  
-  else if (snelheid_mps < gewenste_snelheid - 0.1) 
-  {
-    snelheid_mps = gewenste_snelheid ; // Onmiddelijk veranderen naar gewenste_snelheid
-    snelheid_sturen(snelheid_mps) ;
-  }
-  
-  else if (snelheid_mps > gewenste_snelheid + 0.05) 
-  {
-    snelheid_mps = snelheid_mps - 0.025 ;// verminderen met: +- 0.1m/s 
-    snelheid_sturen(snelheid_mps) ;
-  }
-  
-  else if (snelheid_mps < gewenste_snelheid - 0.05) 
-  {
-    snelheid_mps = snelheid_mps - 0.025 ;// verminderen met: +- 0.1m/s 
-    snelheid_sturen(snelheid_mps) ;
-  }
-} 
- 
 void snelheid_sturen(int snelheid_mps){
   snelheid_pwm = mpsToPwm(snelheid_mps) ; // snelheid_mps omzetten in pmw singaal en snelheid_pwm naar de motor sturen
-  if (richting == 0) {    
+  if (richting == 0) {
   analogWrite(PIN_MOTOR_1, snelheid_pwm) ;
   }
   else {
   analogWrite(PIN_MOTOR_2, snelheid_pwm) ;
   }
 }
- 
+
+void snelheidAanpassen(int snelheid_mps, int gewenste_snelheid) {
+
+  if (gewenste_snelheid == 0){
+    analogWrite(PIN_MOTOR_1, 0) ;
+    analogWrite(PIN_MOTOR_2, 0) ;
+  }
+
+  else if ((snelheid_mps > (gewenste_snelheid - 0.2)) && (snelheid_mps < (gewenste_snelheid + 0.2)))
+  {
+  }
+
+  else if (snelheid_mps > gewenste_snelheid + 0.1) // In m/s
+  {
+    snelheid_mps = gewenste_snelheid ; // Onmiddelijk veranderen naar gewenste_snelheid
+    snelheid_sturen(snelheid_mps) ;
+  }
+
+  else if (snelheid_mps < gewenste_snelheid - 0.1)
+  {
+    snelheid_mps = gewenste_snelheid ; // Onmiddelijk veranderen naar gewenste_snelheid
+    snelheid_sturen(snelheid_mps) ;
+  }
+
+  else if (snelheid_mps > gewenste_snelheid + 0.05)
+  {
+    snelheid_mps = snelheid_mps - 0.025 ;// verminderen met: +- 0.1m/s
+    snelheid_sturen(snelheid_mps) ;
+  }
+
+  else if (snelheid_mps < gewenste_snelheid - 0.05)
+  {
+    snelheid_mps = snelheid_mps - 0.025 ;// verminderen met: +- 0.1m/s
+    snelheid_sturen(snelheid_mps) ;
+  }
+}
+
+
  ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
  ///Communicatie////////////////////////////////////////////////////////////////////////////////////////////////
  ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
- 
+
 // void receiveEvent(int howMany){
 //   if (Wire.available() == 3) {
 //     richting = Wire.read();
@@ -292,15 +254,54 @@ void snelheid_sturen(int snelheid_mps){
 //     gewenste_snelheid_comm = Wire.read();
 //   }
 // }
- 
+
  ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
  ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
  ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
-   
-  
-  
-  
-  
-  
-  
-  
+void setup() {
+  pinMode(PIN_SPEED, INPUT);
+  pinMode(PIN_COLLISION, INPUT);
+  pinMode(PIN_EM_OUT, OUTPUT);
+
+  pinMode(PIN_EM_IN, INPUT);
+  pinMode(PIN_MOTOR_1, OUTPUT);
+  pinMode(PIN_MOTOR_2, OUTPUT);
+
+  Serial.begin(9600); //Communication with LCD
+
+//  // Communicatie
+//  Wire.begin(I2C_ADDRESS);      // join i2c bus with address #2
+//  Wire.onReceive(receiveEvent); // register event = Communicatie info uitlezen
+//
+  // Noodtoestand
+  attachInterrupt(digitalPinToInterrupt(PIN_EM_IN), emergencySignal, CHANGE);
+}
+
+void loop() {
+
+  //gewenste_snelheid = commSpeedToMps(gewenste_snelheid_comm); // gewenste_snelheid_comm omzetten in m/s waarde.
+  gewenste_snelheid = commSpeedToMps(128);
+  //Serial.print(gewenste_snelheid);
+  // Aflezen snelheidssensor
+  meetSensoren();
+  noodtoestandControle();
+
+  Serial.println(noodtoestand);
+  delay(1000);
+  if (noodtoestand == 0){
+    snelheidAanpassen(snelheid_mps, gewenste_snelheid);
+  }
+
+  // Als we voor het LCD een schaal vaal 0.5m/s nemem, en bv 10m/s uitbeelden
+  // met een snelheid tussen 9.6m/s en 10.4m/s dan zal de snelheid op het
+  // LCD niet moeten veranderen elke keer we een kleine aanpassing doen.
+
+}
+
+
+
+
+
+
+
+
