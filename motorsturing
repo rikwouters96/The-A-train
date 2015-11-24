@@ -31,11 +31,13 @@
 
   // Snelheden
   boolean gewenste_richting = 2;   // 0 = vooruit, 1 = achteruit 2 = stil
-  float gewenste_snelheid_mps;  // in mps
-  float gewenste_snelheid_comm;  // 0-255
-  float snelheid_mps; //ogenblikkelijke snelheid mps
-  float snelheid_rpm; //ogenblikkelijk toerental
-  float snelheid_pwm; //ogenblikkelijke pwm waarde geschreven naar motor
+  float gewenste_snelheid_mps = 0;  // in mps
+  byte gewenste_snelheid_comm = 0;  // 0-255
+  int gewenste_snelheid_sens = 0; //sensorwaarde die moet worden benaderd, volgt uit gewenste_snelheid_comm
+
+  float snelheid_mps = 0; //ogenblikkelijke snelheid mps
+  float snelheid_rpm = 0; //ogenblikkelijk toerental
+  float snelheid_pwm = 0; //ogenblikkelijke pwm waarde geschreven naar motor
 
   //Constanten
   float OMTREK_WIEL = 0.115;
@@ -43,6 +45,8 @@
   float MAX_PWM = 255;
   float MAX_MPS = (0.115 * (MAX_RPM / 60));
   float MAX_SPEED = 255;
+
+  int SNEL_COMM_TO_SENS[] = {0,100,200};//Van communicatie wordt of 0; of 25 of 50 procent snelheid ontvangen, dit zijn de respectievelijke sensorwaarden die benaderd moeten worden.
 
   // Sensorwaarden
   int snelheid_raw; //gemeten waard snelheid 0-255
@@ -94,7 +98,6 @@ void meetSensoren(){
   snelheid_raw = analogRead(PIN_SPEED);
 
   snelheid_rpm = (snelheid_raw * MAX_RPM) / 1023 ;
-  snelheid_pwm = (snelheid_rpm * MAX_PWM) / MAX_RPM;
   snelheid_mps = OMTREK_WIEL * (snelheid_rpm / 60) ;
 
   /////////////////
@@ -147,7 +150,7 @@ float mpsToPwm(float snelheid_mps){
   return snelheid_pwm = (snelheid_rpm*MAX_PWM)/MAX_RPM ;
 }
 
-float commSpeedToMps(byte gewenste_snelheid_comm) {
+float commSpeedToMps() {
 
   float gew_snelheid_mps = ((gewenste_snelheid_comm * MAX_MPS) / MAX_SPEED) ;
   return gew_snelheid_mps ;
@@ -161,12 +164,13 @@ void snelheid_sturen(boolean niet_remmen = true){
 
 	if(niet_remmen){
 
-		snelheid_pwm = mpsToPwm(snelheid_mps) ; // snelheid_mps omzetten in pmw singaal en snelheid_pwm naar de motor sturen
 		if (gewenste_richting == 0) {//vooruit
-		    analogWrite(PIN_MOTOR_V, snelheid_pwm) ;
+		    analogWrite(PIN_MOTOR_V, snelheid_pwm);
 		}
 		else if (gewenste_richting == 1){ //achteruit
-		  analogWrite(PIN_MOTOR_A, snelheid_pwm) ;
+		  analogWrite(PIN_MOTOR_A, snelheid_pwm);
+		  analogWrite(PIN_MOTOR_V, 0);
+
 		}
 	}
 	else{
@@ -177,36 +181,19 @@ void snelheid_sturen(boolean niet_remmen = true){
 
 void snelheidAanpassen() {
 
-  if (gewenste_snelheid_mps == 0){
-    analogWrite(PIN_MOTOR_V, 0) ;
-    analogWrite(PIN_MOTOR_A, 0) ;
+  if (gewenste_snelheid_sens == 0){ //rem
+    snelheid_sturen(false);
   }
 
-  else if ((snelheid_mps > (gewenste_snelheid_mps - 0.2)) && (snelheid_mps < (gewenste_snelheid_mps + 0.2)))
+  else if ((gewenste_snelheid_sens > snelheid_raw) && snelheid_pwm >= 0)
   {
-  }
-
-  else if (snelheid_mps > gewenste_snelheid_mps + 0.1) // In m/s
-  {
-    snelheid_mps = gewenste_snelheid_mps ; // Onmiddelijk veranderen naar gewenste_snelheid
+    snelheid_pwm--;
     snelheid_sturen();
   }
 
-  else if (snelheid_mps < gewenste_snelheid_mps - 0.1)
+  else if ((gewenste_snelheid_sens < snelheid_raw) && snelheid_pwm <= 255)
   {
-    snelheid_mps = gewenste_snelheid_mps ; // Onmiddelijk veranderen naar gewenste_snelheid
-    snelheid_sturen() ;
-  }
-
-  else if (snelheid_mps > gewenste_snelheid_mps + 0.05)
-  {
-    snelheid_mps = snelheid_mps - 0.025 ;// verminderen met: +- 0.1m/s
-    snelheid_sturen() ;
-  }
-
-  else if (snelheid_mps < gewenste_snelheid_mps - 0.05)
-  {
-    snelheid_mps = snelheid_mps - 0.025 ;// verminderen met: +- 0.1m/s
+    snelheid_pwm++;
     snelheid_sturen() ;
   }
 }
@@ -278,9 +265,9 @@ void setLCDCursor(byte cursor_position)
 void update_lcd(){
 	clearDisplay();
 	Serial.write("SPEED ");
-	Serial.write(snelheid_mps);
+	Serial.write(gewenste_snelheid_comm);
 	setLCDCursor(10);
-	Serial.write("m/s");
+//	Serial.write("m/s");
 	setLCDCursor(16);
 	Serial.write(noodtoestand_extern);
 	Serial.write(" ");
@@ -303,6 +290,7 @@ void receiveEvent(int bytes_received){
    if (gewenste_snelheid_comm == 0){
 	   gewenste_richting = 2;
    }
+   gewenste_snelheid_sens = SNEL_COMM_TO_SENS[gewenste_snelheid_comm];
  }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -350,19 +338,12 @@ void setup() {
 
 void loop() {
 
-  //gewenste_snelheid = commSpeedToMps(gewenste_snelheid_comm); // gewenste_snelheid_comm omzetten in m/s waarde.
-  gewenste_snelheid_mps = commSpeedToMps(gewenste_snelheid_comm);
-
-  // Aflezen snelheidssensor
   meetSensoren();
   nood_controle();
 
   if (noodtoestand_lokaal <= 2){
     snelheidAanpassen();
   }
-  // Als we voor het LCD een schaal vaal 0.5m/s nemem, en bv 10m/s uitbeelden
-  // met een snelheid tussen 9.6m/s en 10.4m/s dan zal de snelheid op het
-  // LCD niet moeten veranderen elke keer we een kleine aanpassing doen.
 
   update_lcd();
 }
