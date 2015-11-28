@@ -1,5 +1,7 @@
 /*
   Copyright (c) 2015 Johannes Verherstraeten
+  
+  This code makes use of the library VirtualWire, written by Mike McCauley (mikem@airspayce.com)
 
   Permission is hereby granted, free of charge, to any person obtaining a copy
   of this software and associated documentation files (the "Software"), to deal
@@ -20,96 +22,108 @@
   SOFTWARE.
 */ 
 
-// Included: communication with MOTOR, communication with COMFORT
-// Half included: state of emergency
-// Not included: communication with CCE
-
-#include <Wire.h>
+#include <Wire.h>                                      // include library for I2C communication.
+#include "VirtualWireWithoutPTT.h"                     // include library for radio communication.
 
 // Pin definitions: 
-int PIN_IR_DECODER_VT = 1;                            // this pin jumps high when a beacon is correctly registered.
-int PIN_IR_DECODER_D1 = 10;                           // most significant bit.
+int PIN_IR_DECODER_VT = 1;                             // pin from the decoder that jumps high when a beacon has been coded correctly.
+int PIN_IR_DECODER_D1 = 10;                            // least significant bit.
 int PIN_IR_DECODER_D2 = 11;
 int PIN_IR_DECODER_D3 = 8;
-int PIN_IR_DECODER_D4 = A0;                           // least significant bit.
-int PIN_EMERGENCY_MOTOR = 0;
-int PIN_EMERGENCY_COMMUNICATION = 7; 
+int PIN_IR_DECODER_D4 = A0;                            // most significant bit.
+int PIN_EMERGENCY_MOTOR = 0;                           // emergency interrupt pin.
+int PIN_EMERGENCY_COMMUNICATION = 7;                   // emergency interrupt pin.
+int TRANSMIT_PIN = 12;                                 // radio transmitter pin.
+int RECEIVE_PIN =13;                                   // radio receiver pin.
 
-// IR interrupt variables:                            // Values that can be changed in an interrupt function must be declared as volatile.
-volatile boolean ir_decoder_d1;                       // binary decoder readings.
+// I2C adresses:
+byte MOTOR_ADRESS = 2;
+byte COMFORT_ADRESS = 3;
+// RF adresses:
+int CCE_ADRESS = 0;
+int COMM_ADRESS = 1;
+
+// IR interrupt variables:                             // Values that can be changed in an interrupt function must be declared as volatile.
+volatile boolean ir_decoder_d1;                        // binary decoder readings.
 volatile boolean ir_decoder_d2;
 volatile boolean ir_decoder_d3;
 volatile boolean ir_decoder_d4;
-volatile byte current_location;                       // contains current location type byte.                START VALUE NEEDED!!
-volatile byte beacon;                                 // contains last passed beacon number.
-volatile byte beacon_type;                            // contains last passed beacon type. 
-volatile int beacon_ticks = 0;                        // prevents multiple registration of one beacon. A beacon will only be registered when beacon_ticks is back at zero.
-volatile boolean location_change = false;             // true if the location type is changed.
+volatile byte current_location;                        // contains current location type byte.                START VALUE NEEDED!!
+volatile byte beacon;                                  // contains last passed beacon number.
+volatile byte beacon_type;                             // contains last passed beacon type. 
+volatile int beacon_ticks = 0;                         // prevents multiple registration of one beacon. A beacon will only be registered when beacon_ticks is back at zero.
+volatile boolean location_change = false;              // true if the location type is changed.
 
-// Other control variables:
-float TERMINAL_ARRIVING_TIME = 3000;                   // time in milliseconds between passing a terminal beacon and stopping the train.
-float TERMINAL_INTERNATIONAL_ARRIVING_TIME = 3000;     // time in milliseconds between passing a terminal beacon and stopping the train.
-float TIME_TO_OPEN_DOORS = 1500;                       // time in milliseconds between stopping the train and opening the doors. 
-float TIME_TO_CLOSE_DOORS = 1500;                      // time in milliseconds between closing the doors and departure. 
-float terminal_waiting_time = 20000;                   // time in milliseconds. The time the train must wait in a normal terminal.
-float terminal_international_waiting_time = 40000;     // time in milliseconds. The time the train must wait in an international terminal.
-unsigned long terminal_beacon_passed_time;                // time in milliseconds since Arduino startup. The time of the last terminal beacon passing is saved.
-unsigned long arrival_time;                               // time in milliseconds since Arduino startup. The time when the train stops at the terminal.
-unsigned long doors_opening_time;                         // time in milliseconds since Arduino startup. The time when the doors open in the terminal.
-unsigned long doors_closing_time;                         // time in milliseconds since Arduino startup. The time when the doors close in the terminal.
-unsigned long departure_time;                             // time in milliseconds since Arduino startup. The time of departure.
-unsigned long emergency_situation_start_time;             // time in milliseconds since Arduino startup. The time when the last emergency situation started.
-unsigned long emergency_situation_duration;               // time in milliseconds. The duration of the last emergency situation.
-unsigned long current_time;                               // time in milliseconds since Arduino startup. The time measured at that moment.
-boolean doors_opened = false;
-boolean emergency_situation = false;
+// Emergency interrupt variables:
+volatile byte current_status = 0;                      // status: 0=CCE independant, 1=controlled by CCE, 2=state of emergency.
 
 // Loop timing variables: 
 unsigned long last_loop_time;                          // time in milliseconds of last loop.
 unsigned long loop_start_time;                         // time in milliseconds since Arduino startup. The starting time of the last loop.
+
+// Timing control variables:
+float TIME_BETWEEN_TRANSMISSIONS = 2000;               // time in milliseconds between radio transmissions. 
+float TIME_TO_OPEN_DOORS = 1500;                       // time in milliseconds between stopping the train and opening the doors. 
+float TIME_TO_CLOSE_DOORS = 1500;                      // time in milliseconds between closing the doors and departure. 
+float terminal_waiting_time = 20000;                   // time in milliseconds. The time the train must wait in a normal terminal.
+float terminal_international_waiting_time = 40000;     // time in milliseconds. The time the train must wait in an international terminal.
+unsigned long arrival_time;                            // time in milliseconds since Arduino startup. The time when the train stops at the terminal.
+unsigned long doors_opening_time;                      // time in milliseconds since Arduino startup. The time when the doors open in the terminal.
+unsigned long doors_closing_time;                      // time in milliseconds since Arduino startup. The time when the doors close in the terminal.
+unsigned long departure_time;                          // time in milliseconds since Arduino startup. The time of departure.
+unsigned long current_time;                            // time in milliseconds since Arduino startup. The time measured at that moment.
+unsigned long next_transmission_time;                  // time in milliseconds since Arduino startup. The time for the next radio transmission.
+boolean doors_opened = false;
+
+boolean CCE_message_received = false;
+
+// Speed & direction:
+volatile byte CCE_speed;                               // value between 0 and 255. Speed desired by CCE, when in CCE controlled mode.
+volatile byte CCE_speed_direction;                     // 1=forward, 0=backward. Direction desired by CCE, when in CCE controlled mode.
+byte track_speed;                                      // value between 0 and 255. Speed when in independant mode.
+byte track_speed_direction;                            // 1=forward, 0=backward. Direction when in independant mode.
+boolean FORWARD = 1;
+boolean BACKWARD = 0;
+byte FULL_SPEED = 180;
+byte HALF_SPEED = 100;
+byte SLOW_SPEED = 60;
+byte STOP = 0; 
 
 // Location types: 
 byte STRAIGHT_TRACK = 0;
 byte TERMINAL = 1;
 byte TERMINAL_INTERNATIONAL = 2;
 byte TRACK_TURN = 3;
-byte TRACK_SWITCH = 4; 
-byte TERMINAL_ARRIVAL = 5;
-byte TERMINAL_INTERNATIONAL_ARRIVAL = 6;
-byte TERMINAL_DEPARTURE = 7;
-byte TERMINAL_INTERNATIONAL_DEPARTURE = 8;
+byte TRACK_SWITCH = 4;
 
-// I2C adresses:
-byte MOTOR_ADRESS = 2;
-byte COMFORT_ADRESS = 3;
+byte TRACK_SWITCH_AND_TURN = 5;                  // only a beacon type, cannot be a current location.
+byte TRACK_SWITCH_AND_TERMINAL_ARRIVAL = 6;      // only a beacon type, cannot be a current location.
 
-// Motor speed & direction
-boolean motor_speed_direction;                         // 0=forward, 1=backward.                                 START VALUE NEEDED!!
-byte motor_power;                                      // value between 0 and 255.
-boolean FORWARD = 0;
-boolean BACKWARD = 1;
-byte FULL_SPEED = 255;
-byte HALF_SPEED = 128;
-byte SLOW_SPEED = 64;
-byte STOP = 0; 
+byte TERMINAL_ARRIVAL = 7;
+byte TERMINAL_DEPARTURE = 8;                     // only a location type, cannot be a beacon type.
 
 // Beacon number -> beacon type array
 // Each beacon can have a number from 0 to 15 so CCE can track our location. But we need to know the type of 
 // location this beacon marks. The value at the index of the beacon number represents the location type. 
- volatile byte beacon_number_to_type[16] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
+byte beacon_number_to_type[16] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
 
 
-// ================================================================
-// ===                      INITIAL SETUP                       ===
-// ================================================================
+// ============================================================================
+// =========                      INITIAL SETUP                       =========
+// ============================================================================
 
 void setup() {
 
-  Serial.begin(115200);                                                                      // start serial communication with pc, baudrate: 115200.
+  Serial.begin(115200);                              // start serial communication with pc, baudrate: 115200.
   while (!Serial);
+  Serial.print("setup");
+  Wire.begin();                                      // join i2c bus for communication with MOTOR and COMFORT (address optional for master).
   
-  Wire.begin();                                                                              // join i2c bus for communication with MOTOR and COMFORT (address optional for master).
-    
+  vw_set_tx_pin(TRANSMIT_PIN);                       // set virtual wire for RF communication
+  vw_set_rx_pin(RECEIVE_PIN);
+  vw_setup(2000);	                                   // Bits per sec
+  vw_rx_start();                                     // Start the receiver PLL running
+  
   pinMode(PIN_IR_DECODER_VT, INPUT);
   pinMode(PIN_IR_DECODER_D1, INPUT);
   pinMode(PIN_IR_DECODER_D2, INPUT);
@@ -117,247 +131,307 @@ void setup() {
   pinMode(PIN_IR_DECODER_D4, INPUT);
   pinMode(PIN_EMERGENCY_MOTOR, INPUT);
   pinMode(PIN_EMERGENCY_COMMUNICATION, OUTPUT);
+  
+  current_location = STRAIGHT_TRACK;                 // start position and direction. Temporary solution since there is no initialisation message yet.
+  track_speed_direction = FORWARD;
+  beacon = 0; 
+  location_change = true; 
+  digitalWrite(PIN_EMERGENCY_COMMUNICATION, LOW);
 
   attachInterrupt(digitalPinToInterrupt(PIN_IR_DECODER_VT), decoder_interrupt, RISING);      // call decoder interrupt function when VT pin goes high.
+  attachInterrupt(digitalPinToInterrupt(PIN_EMERGENCY_MOTOR), emergency_interrupt, CHANGE);  // call emergency interrupt function when motor emergency pin changes.
   
-  attachInterrupt(digitalPinToInterrupt(PIN_EMERGENCY_MOTOR), emergency_interrupt, RISING);  // call emergency interrupt function when motor emergency pin goes high.
-  
-  current_location = STRAIGHT_TRACK;                                                         // start position and direction: 
-  motor_speed_direction = FORWARD;
-  location_change = true; 
   loop_start_time = millis();
+  next_transmission_time = loop_start_time + TIME_BETWEEN_TRANSMISSIONS;  
   }
 
 
-// ================================================================
-// ===                    MAIN PROGRAM LOOP                     ===
-// ================================================================
+// ============================================================================
+// =========                    MAIN PROGRAM LOOP                     =========
+// ============================================================================
 // The main program loop is optimized for running-through as fast as possible. (almost no delays etc...)
 // This means we can listen almost continuously for messages from CCE and react as quickly as possible.
 void loop() {
   
-  if (emergency_situation == true) {                                                     // in case of emergency:
-    emergency_situation_start_time = millis();                                           
-    Serial.println("Emergency situation!");                                              // next lines of code keep the train in emergency mode until it serially receives a character from the pc.
-    Serial.println("...Send any character to end emergency situation");                  // this is a temporary solution and it will be changed when the communication with CCE is added. 
-    while (Serial.available() && Serial.read());                                         // empty serial buffer.
-    while (!Serial.available()) {                                                        // wait for serial input.
-      delay(1000);
-      }
-    while (Serial.available() && Serial.read());                                         // empty buffer again.
-    Serial.println("Emergency situation ended"); 
-    if (current_location == TERMINAL_ARRIVAL || current_location == TERMINAL_INTERNATIONAL_ARRIVAL) {
-      emergency_situation_duration = millis() - emergency_situation_start_time;          // if the state of emergency is called while arriving a terminal, save the duration to correct the terminal stop time.
-      }                                                                                  
+  // ----------- State of emergency ------------------------------------------------------------------------------------------------------------
+  if (current_status == 2) {
+    Serial.println("Emergency situation!"); 
+    delay(100);
     }
-  
-  
-  if (location_change) {                                                                 // things that happen when location type changes. The code is pretty obvious.
+  // ----------- Location change ---------------------------------------------------------------------------------------------------------------
+  else if (location_change) {                                      // things that happen when location type changes. 
     Serial.print("Location change. Current location: ");
     Serial.println(current_location);
-    if (current_location == STRAIGHT_TRACK) {
-      motor_power = HALF_SPEED;
-      }
-    else if (current_location == TRACK_TURN || current_location == TRACK_SWITCH) {
-      motor_power = SLOW_SPEED; 
-      }
-    else if (current_location == TERMINAL_ARRIVAL || current_location == TERMINAL_INTERNATIONAL_ARRIVAL) {
-      motor_power = SLOW_SPEED;
-      send_comfort_arrival();
-      emergency_situation_duration = 0;                                                  // just arriving a terminal: reset the emergency_situation_duration.
-      terminal_beacon_passed_time = millis();
-      }
-    else if (current_location == TERMINAL) {
-      motor_power = STOP;
-      motor_speed_direction = !motor_speed_direction;
-      arrival_time = millis();
-      doors_opening_time = arrival_time + TIME_TO_OPEN_DOORS; 
-      }
-    else if (current_location == TERMINAL_INTERNATIONAL) {
-      motor_power = STOP;
-      arrival_time = millis();
-      doors_opening_time = arrival_time + TIME_TO_OPEN_DOORS; 
-      }
-    else if (current_location == TERMINAL_DEPARTURE || current_location == TERMINAL_INTERNATIONAL_DEPARTURE) {
-      motor_power = SLOW_SPEED;
-      }
-    send_motor_speed();
-    location_change = false;
+    location_change_function();
     }
+  // ----------- No location change ------------------------------------------------------------------------------------------------------------
+  else {
+    if (current_location == TERMINAL || current_location == TERMINAL_INTERNATIONAL) {
+      terminal_function();
+      }
+    }
+  // ----------- CCE messages ------------------------------------------------------------------------------------------------------------------                                                                                       
+  uint8_t buf[VW_MAX_MESSAGE_LEN];                          
+  uint8_t buflen = VW_MAX_MESSAGE_LEN;
   
-                                                                                         
-  else if (current_location == TERMINAL_ARRIVAL) {
-    current_time = millis();
-    if (current_time > terminal_beacon_passed_time +                         // after the arriving time has passed, the train stops.
-                       TERMINAL_ARRIVING_TIME + 
-                       emergency_situation_duration) {    
-      location_change == true;      
-      current_location == TERMINAL; 
-      }
-    }
-  else if (current_location == TERMINAL_INTERNATIONAL_ARRIVAL) {
-    current_time = millis();
-    if (current_time > terminal_beacon_passed_time +                         // after the arriving time has passed, the train stops.
-                       TERMINAL_INTERNATIONAL_ARRIVING_TIME + 
-                       emergency_situation_duration) {    
-      location_change == true;      
-      current_location == TERMINAL_INTERNATIONAL; 
-      }
-    }  
-    
-  else if (current_location == TERMINAL) {   
-    current_time = millis();
-    if ((departure_time > arrival_time) && (current_time > departure_time)  && (doors_opened == false)) {               // If departure_time is already updated and exceeded and the doors are closed: depart. 
-      Serial.println("Departure");
-      location_change = true;
-      current_location == TERMINAL_DEPARTURE;
-      }
-    else if ((doors_closing_time > arrival_time) && (current_time > doors_closing_time) && (doors_opened == true)) {    // If door_closing_time is already updated and exceeded and the doors are still open: close doors.
-      Serial.println("Close doors");
-      send_comfort_close_doors(); 
-      doors_opened = false;
-      departure_time = current_time + TIME_TO_CLOSE_DOORS;                                                              // and update departure_time.
-      }
-    else if (current_time > doors_opening_time && doors_opened == false) {                 // If the doors_opening_time is exceeded and the doors are still closed: open doors.
-      Serial.println("Open doors");
-      send_comfort_open_doors();
-      doors_opened = true;
-      doors_closing_time = current_time + terminal_waiting_time;                           // and update doors_closing_time.
-      }
-    else {                                                                                 // If the doors must not be opened yet, wait.
-      delay(10);
-      }
-    }    
-  else if (current_location == TERMINAL_INTERNATIONAL) {
-    current_time = millis();
-    if ((departure_time > arrival_time) && (current_time > departure_time)  && (doors_opened == false)) {               // If departure_time is already updated and exceeded and the doors are closed: depart. 
-      Serial.println("Departure");
-      location_change = true;
-      current_location == TERMINAL_INTERNATIONAL_DEPARTURE;
-      }
-    else if ((doors_closing_time > arrival_time) && (current_time > doors_closing_time) && (doors_opened == true)) {    // If door_closing_time is already updated and exceeded and the doors are still open: close doors.
-      Serial.println("Close doors");
-      send_comfort_close_doors(); 
-      doors_opened = false;
-      departure_time = current_time + TIME_TO_CLOSE_DOORS;                                                              // and update departure_time.
-      }
-    else if (current_time > doors_opening_time && doors_opened == false) {              // If the doors_opening_time is exceeded and the doors are still closed: open doors.
-      Serial.println("Open doors");
-      send_comfort_open_doors();
-      doors_opened = true;
-      doors_closing_time = current_time + terminal_international_waiting_time;          // and update doors_closing_time.
-      }
-    else {                                                                              // If the doors must not be opened yet, wait.
-      delay(10);
-      }    
+  current_time = millis();
+  
+  if (current_time >= next_transmission_time){                              // when it's time for another radio transmission:
+    next_transmission_time = current_time + TIME_BETWEEN_TRANSMISSIONS;     // set new transmission time,
+    send_CCE_message();                                                     // and send the message.
     }
     
-  if (beacon_ticks > 0) beacon_ticks--;         // When a beacon is registered, beacon_ticks is set to a certain number (ex 50). Each loop this number is decreased. 
-  delay(5);                                     // A new beacon can only be registered when beacon_ticks is zero. This prevents multiple registrations of one beacon.
-  
+  if (vw_have_message()) {                                                  // if a message received:
+    if (vw_get_message(buf, &buflen)) {                                     // if the message is correctly decoded:
+      if (buf[0] == COMM_ADRESS) {                                          // if the first byte is the communication adress:
+        get_CCE_message(buf, buflen);                                       // get the message.
+        CCE_message_received = true;
+        }
+      else CCE_message_received = false;
+      }
+    }
+  // ----------- Time control ------------------------------------------------------------------------------------------------------------------
+  if (beacon_ticks > 0) beacon_ticks--;    // When a beacon is registered, beacon_ticks is set to a certain number (ex 50). Each loop this number is decreased. 
+  delay(5);                                // A new beacon can only be registered when beacon_ticks is zero. This prevents multiple registrations of one beacon.
   // --- loop timing -------------------------------
   last_loop_time = millis() - loop_start_time;
   loop_start_time = millis();
   // -----------------------------------------------
-  }    
+  }        
     
     
-// ================================================================
-// ===                  INTERRUPT FUNCTIONS                     ===
-// ================================================================
-// Interrupt functions must be as fast as possible. 
-void decoder_interrupt() {                                                              // the interrupt function to be called when the VT-pin from the decoder goes high.
-  if (beacon_ticks > 0) return;                                                         // don't register beacons if beacon_ticks is not zero.
+// ============================================================================
+// =========                  INTERRUPT FUNCTIONS                     =========
+// ============================================================================
+// Interrupt functions must be as fast as possible.
+void emergency_interrupt() {                                   // when the emergency line from motor goes changes: 
+  bool emergency_motor = digitalRead(PIN_EMERGENCY_MOTOR);
+  
+  switch (emergency_motor) {
+    case 0:                                                    // if the line goes low, emergency situation ended.
+      current_status = 1;                                      // but wait for a message from CCE to start again.
+      CCE_speed = 0;
+      CCE_speed_direction = track_speed_direction; 
+      send_motor_speed();                          
+      break;
+    case 1:                                                    // if the line goes high, emergency situation started.
+      current_status = 2;                                      // the next time a message will be sent to CCE, the
+      break;                                                   // status will be emergency. 
+    }
+  }
+  
+  
+void decoder_interrupt() {                                     // when the decoder pulls the VT line high: 
+  if (beacon_ticks > 0) return;                                // do nothing when beacon ticks is not yet zero.
   
   Serial.println("Beacon registered!");
   
-  ir_decoder_d1 = digitalRead(PIN_IR_DECODER_D1);                                       // read IR decoder pins.
+  ir_decoder_d1 = digitalRead(PIN_IR_DECODER_D1);
   ir_decoder_d2 = digitalRead(PIN_IR_DECODER_D2);
   ir_decoder_d3 = digitalRead(PIN_IR_DECODER_D3);
   ir_decoder_d4 = digitalRead(PIN_IR_DECODER_D4);
   
-  beacon = 8*ir_decoder_d1 + 4*ir_decoder_d2 + 2*ir_decoder_d3 + 1*ir_decoder_d4;       // convert readings to the corresponding binary number.
-  beacon_type = beacon_number_to_type[beacon];                                          // check the beacon type corresponding with this beacon number.
+  beacon = 1*ir_decoder_d1 + 2*ir_decoder_d2 + 4*ir_decoder_d3 + 8*ir_decoder_d4; 
+  beacon_type = beacon_number_to_type[beacon]; 
   
-  if ((current_location == TERMINAL_DEPARTURE && beacon_type == TERMINAL)
-      || (current_location == TERMINAL_INTERNATIONAL_DEPARTURE && beacon_type == TERMINAL_INTERNATIONAL)) {                                       
-    current_location = STRAIGHT_TRACK; 
+  if (beacon_type == TERMINAL && current_location != TERMINAL_ARRIVAL) {
+    // don't change the current location... 
+    return;
     }
-  else if (beacon_type == TERMINAL) {
-    current_location == TERMINAL_ARRIVAL;
+  else if (beacon_type == TERMINAL_ARRIVAL && current_location == TERMINAL_DEPARTURE) {
+    current_location = STRAIGHT_TRACK;
     }
-  else if (beacon_type == TERMINAL_INTERNATIONAL) {
-    current_location == TERMINAL_INTERNATIONAL_ARRIVAL;
+  else if (beacon_type == TRACK_SWITCH_AND_TERMINAL_ARRIVAL && current_location == TRACK_SWITCH) {
+    current_location = TERMINAL_ARRIVAL;
+    }
+  else if (beacon_type == TRACK_SWITCH_AND_TERMINAL_ARRIVAL) {
+    current_location = TRACK_SWITCH;
+    }
+  else if (beacon_type == TRACK_SWITCH_AND_TURN && current_location == TRACK_TURN) {
+    current_location = TRACK_SWITCH;
+    }
+  else if (beacon_type == TRACK_SWITCH_AND_TURN) {
+    current_location = TRACK_TURN;
     }
   else if (beacon_type == current_location) {
-    current_location = STRAIGHT_TRACK; 
+    current_location = STRAIGHT_TRACK;
     }
   else {
     current_location = beacon_type;
     }
   location_change = true;
   beacon_ticks = 50;
+  }    
+    
+// ============================================================================
+// =========                   HELPER FUNCTIONS                       =========
+// ============================================================================    
+
+void location_change_function() {
+  
+  if (current_location == STRAIGHT_TRACK) {
+    track_speed = FULL_SPEED;
+    }
+  else if (current_location == TRACK_TURN || current_location == TRACK_SWITCH) {
+    track_speed = HALF_SPEED; 
+    }
+  else if (current_location == TERMINAL_ARRIVAL) {
+    track_speed = SLOW_SPEED;
+    send_comfort_arrival();
+    }
+  else if (current_location == TERMINAL) {
+    track_speed = STOP;
+    track_speed_direction = !track_speed_direction;
+    arrival_time = millis();
+    doors_opening_time = arrival_time + TIME_TO_OPEN_DOORS; 
+    }
+  else if (current_location == TERMINAL_INTERNATIONAL) {
+    track_speed = STOP;
+    arrival_time = millis();
+    doors_opening_time = arrival_time + TIME_TO_OPEN_DOORS; 
+    }
+  else if (current_location == TERMINAL_DEPARTURE) {
+    track_speed = SLOW_SPEED;
+    }
+      
+  if (current_status == 0){
+    send_motor_speed();
+    }
+  location_change = false;
   }
 
 
-void emergency_interrupt() {                                                            // the interrupt function to be called when the emergency pin from MOTOR goes high.
-  emergency_situation = true;
-  // send_emergency_message_to_CCE();  
-  digitalWrite(PIN_EMERGENCY_COMMUNICATION, HIGH); 
+void terminal_function() {
+  current_time = millis();
+  // If departure_time is already updated and exceeded and the doors are closed: depart. 
+  if ((departure_time > arrival_time) && (current_time > departure_time) && (doors_opened == false)) {               
+    Serial.println("Departure");
+    location_change = true;
+    current_location == TERMINAL_DEPARTURE;
+    }
+  // If door_closing_time is already updated and exceeded and the doors are still open: close doors.
+  else if ((doors_closing_time > arrival_time) && (current_time > doors_closing_time) && (doors_opened == true)) {    
+    Serial.println("Close doors");
+    send_comfort_close_doors(); 
+    doors_opened = false;
+    departure_time = current_time + TIME_TO_CLOSE_DOORS;  // and update departure_time.
+    }
+  // If the doors_opening_time is exceeded and the doors are still closed: open doors.
+  else if (current_time > doors_opening_time && doors_opened == false) {                 
+    Serial.println("Open doors");
+    send_comfort_open_doors();
+    doors_opened = true;
+    if (current_location == TERMINAL) {
+      doors_closing_time = current_time + terminal_waiting_time;  // and update doors_closing_time.
+      }
+    else {
+      doors_closing_time = current_time + terminal_international_waiting_time;
+      }
+    }
+  else {
+    delay(10);
+    }
   }
-  
-  
 
-// ================================================================
-// ===                   MOTOR COMMUNICATION                    ===
-// ================================================================
+
+void send_CCE_message() {  
+  uint8_t msg[] = {CCE_ADRESS, beacon, current_status, CCE_message_received};
+  vw_send(msg, 4);
+  vw_wait_tx();                           // Wait until the whole message is gone
+  Serial.println("CCE message sent");
+  } 
+
+
+void get_CCE_message(uint8_t buff[], uint8_t bufflen) {
+  int i;
+  Serial.print("CCE message: ");
+  for (i=0; i<bufflen; i++) {
+    Serial.print(buff[i]);
+    Serial.print(" ");
+    }
+  Serial.println("");
+  
+  if (bufflen == 3) {
+    current_status = buff[2];
+    if (current_status == 1) {
+      get_CCE_speed(buff[1]);
+      send_motor_speed();
+      digitalWrite(PIN_EMERGENCY_COMMUNICATION, LOW); 
+      }
+    else if (current_status == 2) {
+      CCE_speed = STOP;
+      digitalWrite(PIN_EMERGENCY_COMMUNICATION, HIGH); 
+      }
+    else digitalWrite(PIN_EMERGENCY_COMMUNICATION, LOW); 
+    }
+  }  
+
+
+void get_CCE_speed(uint8_t speedbyte) {
+  if (speedbyte > 128) {
+    CCE_speed_direction = FORWARD;
+    CCE_speed = map(speedbyte, 128, 255, STOP, FULL_SPEED);
+    }
+  else if (speedbyte < 128) {
+    CCE_speed_direction = BACKWARD;
+    CCE_speed = map(speedbyte, 128, 0, STOP, FULL_SPEED);
+    }
+  else CCE_speed = 0;
+  }
+
+
+
+// ============================================================================
+// =========                   MOTOR COMMUNICATION                    =========
+// ============================================================================
 // (I2C adress: 2)
-/* A standard message contains two bytes: the speed direction (0=forward, 1=backward) and the motor power (0=stop, 255=full speed). 
+/* A standard message contains two bytes: the speed direction (1=forward, 0=backward) and the motor power (0=stop, 255=full speed). 
    In a terminal, the message is extended with an extra byte. (1=normal terminal, 2=international terminal)
-   At a normal terminal, the train must stop and return to the side where it came from: 
-     When passing the beacon for the normal terminal, a standard message telling to slow down is sent extended with a byte '1' so MOTOR 
-     knows we're arriving a normal terminal.
-     COMM will then wait for MOTOR to pull high the emergency line when the distance sensor registers the end of the track. 
-     COMM will then send a standard message telling to stop and change the direction, again extended with the terminal byte. Motor can now pull down the 
-     emergency line and eventually show a message on the LCD. 
-     When the terminal waiting time has passed, COMM will send a standard message to depart. 
-   At a international terminal, the train must stop and depart in its original direction:
-     When passing the beacon for the international terminal, a standard message telling to slow down is sent extended with a byte '2' so MOTOR 
-     knows we're arriving an international terminal. 
-     This time, there's no end of the track, so COMM will send a standard message after a defined period telling to stop. Tis message is also extended
-     with the terminal byte so MOTOR can eventually show an arrival message on the LCD. 
+   At a terminal, the train must stop and -in case of a normal terminal- return to the side where it came from: 
+     When passing the beacon for the terminal, a standard message telling to slow down is sent.
+     When the train must stop at the terminal, COMM will send a standard message extended with the terminal byte (1=normal terminal, 
+     2=international terminal), telling to stop and eventually change the direction, 
      When the terminal waiting time has passed, COMM will send a standard message to depart. 
 */
-  
 void send_motor_speed() {
-  Wire.beginTransmission(MOTOR_ADRESS);                                 
-  if (current_location == TERMINAL_ARRIVAL || current_location == TERMINAL) {
-    const char message[] = {motor_speed_direction, motor_power, TERMINAL};
-    Wire.write(message, 3);
+  byte speedbyte_send;
+  byte directionbyte_send;
+  if (current_status == 0) {
+    speedbyte_send = track_speed;
+    directionbyte_send = track_speed_direction;
     }
-  else if (current_location == TERMINAL_INTERNATIONAL_ARRIVAL || current_location == TERMINAL_INTERNATIONAL) {
-    const char message[] = {motor_speed_direction, motor_power, TERMINAL_INTERNATIONAL};
+  else {
+    speedbyte_send = CCE_speed;
+    directionbyte_send = CCE_speed_direction;
+    }
+  Serial.print("Send motor:");
+  Serial.println(speedbyte_send);
+  
+  Wire.beginTransmission(MOTOR_ADRESS);                                 
+  if (current_location == TERMINAL || current_location == TERMINAL_INTERNATIONAL) {
+    const char message[] = {directionbyte_send, speedbyte_send, current_location};
     Wire.write(message, 3);
     }
   else {
-    const char message[] = {motor_speed_direction, motor_power};
+    const char message[] = {directionbyte_send, speedbyte_send};
     Wire.write(message, 2);
     }
   Wire.endTransmission();                                              
   }
 
-// ================================================================
-// ===                  COMFORT COMMUNICATION                   ===
-// ================================================================
-// (I2C adress: 3)
-/* Every message to motor contains one byte: the terminal type of arrival (5=normal terminal, 6=international terminal) or the command to open/close the doors (1=open doors, 0=close doors).
-   The terminal type is sent when the train passes the beacon of that terminal. A sound must be played to inform the passengers about the arrival. 
-   The command to open/close the doors is sent a little time after the stop and a little time before the departure. While the doors are opening/closing, a warning sound must be played.
-*/
 
+// ============================================================================
+// =========                  COMFORT COMMUNICATION                   =========
+// ============================================================================
+// (I2C adress: 3)
+/* Every message to comfort contains one byte: the terminal arrival byte (=2) or the command to open/close the doors (1=open doors, 0=close doors).
+   The terminal arrival byte is sent when the train passes the beacon of a terminal. A sound must be played to inform the passengers about the arrival. 
+   The command to open/close the doors is sent a little time after the stop and a little time before the departure. While the doors are opening/closing, 
+   a warning sound must be played.
+*/
 void send_comfort_arrival() {
   Wire.beginTransmission(COMFORT_ADRESS); 
-  const char message[] = {current_location};
+  const char message[] = {2}; 
   Wire.write(message, 1);
   Wire.endTransmission();
   }
@@ -375,4 +449,4 @@ void send_comfort_close_doors() {
   Wire.write(message, 1);
   Wire.endTransmission();
   }
-
+  
