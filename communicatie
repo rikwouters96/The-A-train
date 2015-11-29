@@ -75,7 +75,10 @@ unsigned long current_time;                            // time in milliseconds s
 unsigned long next_transmission_time;                  // time in milliseconds since Arduino startup. The time for the next radio transmission.
 boolean doors_opened = false;
 
-boolean CCE_message_received = false;
+boolean CCE_message_received = false;                  // did the train receive a CCE message since the last transmission.
+byte previous_speedbyte;                               // copy of the previous values sent to motor to avoid multiple identical I2C messages.
+byte previous_directionbyte;
+byte previous_location_sent;
 
 // Speed & direction:
 volatile byte CCE_speed;                               // value between 0 and 255. Speed desired by CCE, when in CCE controlled mode.
@@ -141,8 +144,8 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(PIN_IR_DECODER_VT), decoder_interrupt, RISING);      // call decoder interrupt function when VT pin goes high.
   attachInterrupt(digitalPinToInterrupt(PIN_EMERGENCY_MOTOR), emergency_interrupt, CHANGE);  // call emergency interrupt function when motor emergency pin changes.
   
-  loop_start_time = millis();
-  next_transmission_time = loop_start_time + TIME_BETWEEN_TRANSMISSIONS;  
+  loop_start_time = millis();                                                         // save the loop start time.
+  next_transmission_time = loop_start_time + TIME_BETWEEN_TRANSMISSIONS;              // set the time for the next radio transmission.
   }
 
 
@@ -165,14 +168,14 @@ void loop() {
     location_change_function();
     }
   // ----------- No location change ------------------------------------------------------------------------------------------------------------
-  else {
+  else {                                                           // things that happen when location type doesn't change.
     if (current_location == TERMINAL || current_location == TERMINAL_INTERNATIONAL) {
       terminal_function();
       }
     }
   // ----------- CCE messages ------------------------------------------------------------------------------------------------------------------                                                                                       
-  uint8_t buf[VW_MAX_MESSAGE_LEN];                          
-  uint8_t buflen = VW_MAX_MESSAGE_LEN;
+  uint8_t buf[VW_MAX_MESSAGE_LEN];                                          // initialize the VirtualWire buffer
+  uint8_t buflen = VW_MAX_MESSAGE_LEN;                                      // initialize the VirtualWire buffer length value.
   
   current_time = millis();
   
@@ -189,7 +192,9 @@ void loop() {
         }
       else CCE_message_received = false;
       }
+    else CCE_message_received = false;
     }
+  else CCE_message_received = false;
   // ----------- Time control ------------------------------------------------------------------------------------------------------------------
   if (beacon_ticks > 0) beacon_ticks--;    // When a beacon is registered, beacon_ticks is set to a certain number (ex 50). Each loop this number is decreased. 
   delay(5);                                // A new beacon can only be registered when beacon_ticks is zero. This prevents multiple registrations of one beacon.
@@ -226,15 +231,15 @@ void decoder_interrupt() {                                     // when the decod
   
   Serial.println("Beacon registered!");
   
-  ir_decoder_d1 = digitalRead(PIN_IR_DECODER_D1);
+  ir_decoder_d1 = digitalRead(PIN_IR_DECODER_D1);              // read the decoder pins. 
   ir_decoder_d2 = digitalRead(PIN_IR_DECODER_D2);
   ir_decoder_d3 = digitalRead(PIN_IR_DECODER_D3);
   ir_decoder_d4 = digitalRead(PIN_IR_DECODER_D4);
   
-  beacon = 1*ir_decoder_d1 + 2*ir_decoder_d2 + 4*ir_decoder_d3 + 8*ir_decoder_d4; 
-  beacon_type = beacon_number_to_type[beacon]; 
+  beacon = 1*ir_decoder_d1 + 2*ir_decoder_d2 + 4*ir_decoder_d3 + 8*ir_decoder_d4;   // get the beacon number.
+  beacon_type = beacon_number_to_type[beacon];                                      // translate the beacon number to the beacon type.
   
-  if (beacon_type == TERMINAL && current_location != TERMINAL_ARRIVAL) {
+  if (beacon_type == TERMINAL && current_location != TERMINAL_ARRIVAL) {            // change the current location dependant on the beacon.
     // don't change the current location... 
     return;
     }
@@ -260,14 +265,14 @@ void decoder_interrupt() {                                     // when the decod
     current_location = beacon_type;
     }
   location_change = true;
-  beacon_ticks = 50;
+  beacon_ticks = 50;                                    // set beacon ticks to prevent multiple registration of the same beacon.
   }    
     
 // ============================================================================
 // =========                   HELPER FUNCTIONS                       =========
 // ============================================================================    
 
-void location_change_function() {
+void location_change_function() {                       // things that happen when the current location changes.
   
   if (current_location == STRAIGHT_TRACK) {
     track_speed = FULL_SPEED;
@@ -301,7 +306,7 @@ void location_change_function() {
   }
 
 
-void terminal_function() {
+void terminal_function() {                             // timing control in the terminals.
   current_time = millis();
   // If departure_time is already updated and exceeded and the doors are closed: depart. 
   if ((departure_time > arrival_time) && (current_time > departure_time) && (doors_opened == false)) {               
@@ -334,7 +339,7 @@ void terminal_function() {
   }
 
 
-void send_CCE_message() {  
+void send_CCE_message() {     
   uint8_t msg[] = {CCE_ADRESS, beacon, current_status, CCE_message_received};
   vw_send(msg, 4);
   vw_wait_tx();                           // Wait until the whole message is gone
@@ -344,30 +349,34 @@ void send_CCE_message() {
 
 void get_CCE_message(uint8_t buff[], uint8_t bufflen) {
   int i;
-  Serial.print("CCE message: ");
+  Serial.print("CCE message: ");           // print the received message: |...
   for (i=0; i<bufflen; i++) {
     Serial.print(buff[i]);
     Serial.print(" ");
-    }
-  Serial.println("");
+    } 
+  Serial.println("");                      // ...|
   
-  if (bufflen == 3) {
+  if (bufflen == 3) {                      // only interpret the messages with length 3. 
     current_status = buff[2];
-    if (current_status == 1) {
-      get_CCE_speed(buff[1]);
-      send_motor_speed();
+    if (current_status == 1) {             // if status == CCE_controlled:
       digitalWrite(PIN_EMERGENCY_COMMUNICATION, LOW); 
+      get_CCE_speed(buff[1]);
+      delay(1);
+      send_motor_speed();
       }
-    else if (current_status == 2) {
+    else if (current_status == 2) {        // if status == emergency:
       CCE_speed = STOP;
       digitalWrite(PIN_EMERGENCY_COMMUNICATION, HIGH); 
       }
-    else digitalWrite(PIN_EMERGENCY_COMMUNICATION, LOW); 
+    else {                                 // if status == CCE_independant:
+      digitalWrite(PIN_EMERGENCY_COMMUNICATION, LOW);
+      location_change = true;
+      }
     }
-  }  
+  }
 
 
-void get_CCE_speed(uint8_t speedbyte) {
+void get_CCE_speed(uint8_t speedbyte) {                      // translate the speedbyte received from the CCE to 2 bytes (direction and speed).
   if (speedbyte > 128) {
     CCE_speed_direction = FORWARD;
     CCE_speed = map(speedbyte, 128, 255, STOP, FULL_SPEED);
@@ -392,11 +401,15 @@ void get_CCE_speed(uint8_t speedbyte) {
      When the train must stop at the terminal, COMM will send a standard message extended with the terminal byte (1=normal terminal, 
      2=international terminal), telling to stop and eventually change the direction, 
      When the terminal waiting time has passed, COMM will send a standard message to depart. 
+   Emergency situation:
+     When MOTOR pulls the emergency line high, COMM only sends a message to CCE (and doesn't pull the COMM emergency line high)
+     When MOTOR pulls the emergency line low again, COMM will send a message to stand still untill CCE tells us to go on. 
+     When COMM pulls the emergency line high and then low again, a message will be sent to motor with the desired speed.  
 */
-void send_motor_speed() {
-  byte speedbyte_send;
-  byte directionbyte_send;
-  if (current_status == 0) {
+void send_motor_speed() { 
+  byte speedbyte_send;                              // check which speed to send: the CCE speed or the automatic track speed:
+  byte directionbyte_send;   
+  if (current_status == 0) {                         
     speedbyte_send = track_speed;
     directionbyte_send = track_speed_direction;
     }
@@ -407,6 +420,11 @@ void send_motor_speed() {
   Serial.print("Send motor:");
   Serial.println(speedbyte_send);
   
+  if (speedbyte_send == previous_speedbyte && directionbyte_send == previous_directionbyte  // check if not the same message as last time.
+      && current_location == previous_location_sent) {
+    return;                                                                                 // if so: quit the function.
+    }
+  
   Wire.beginTransmission(MOTOR_ADRESS);                                 
   if (current_location == TERMINAL || current_location == TERMINAL_INTERNATIONAL) {
     const char message[] = {directionbyte_send, speedbyte_send, current_location};
@@ -416,7 +434,11 @@ void send_motor_speed() {
     const char message[] = {directionbyte_send, speedbyte_send};
     Wire.write(message, 2);
     }
-  Wire.endTransmission();                                              
+  Wire.endTransmission();  
+
+  previous_speedbyte = speedbyte_send;
+  previous_directionbyte = directionbyte_send;
+  previous_location_sent = current_location;  
   }
 
 
@@ -428,6 +450,8 @@ void send_motor_speed() {
    The terminal arrival byte is sent when the train passes the beacon of a terminal. A sound must be played to inform the passengers about the arrival. 
    The command to open/close the doors is sent a little time after the stop and a little time before the departure. While the doors are opening/closing, 
    a warning sound must be played.
+   Emergency situation:
+     COMFORT should listen to both emergency interrupt lines. If one of them goes high, emergency situation = true. 
 */
 void send_comfort_arrival() {
   Wire.beginTransmission(COMFORT_ADRESS); 
