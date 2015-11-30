@@ -81,17 +81,13 @@ LiquidCrystal lcd(RSPin, RWPin, ENPin, D4Pin, D5Pin, D6Pin, D7Pin);
   ----------------------------------------------------------*/
 void setup(){
   // initialize the serial communications:
-  setBaudRate(EEPROM.read(BAUD_ADDRESS));
+  setBaudRate(1200);
   
   // Read rows and columns from EEPROM
   // Will default to 2x16, if not previously set
-  rows = EEPROM.read(ROWS_ADDRESS);
-  if (rows != 4)
-    rows = 2;
-  columns = EEPROM.read(COLUMNS_ADDRESS);
-  if (columns != 20)
-    columns = 16;
-  
+  rows = 2;
+  columns = 16;
+ 
   // set up the LCD's number of rows and columns: 
   lcd.begin(columns, rows);
   
@@ -139,7 +135,7 @@ void loop()
       {
         // Wait for the next character
         while(Serial.available() == 0)
-          ;
+         
         setBacklight(Serial.read());
       }
       // baud rate control
@@ -343,9 +339,8 @@ void setBacklight(uint8_t backlightSetting)
   ----------------------------------------------------------*/
 void setBaudRate(uint8_t baudSetting)
 {
-  // If EEPROM is unwritten (0xFF), set it to 9600 by default
-  if (baudSetting==255)
-    baudSetting = 4;
+
+  baudSetting = 1;
     
   switch(baudSetting)
   {
