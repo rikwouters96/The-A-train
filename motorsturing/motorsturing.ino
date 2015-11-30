@@ -20,6 +20,9 @@ M::::::M               M::::::M   OO:::::::::OO         T:::::::::T         OO::
 MMMMMMMM               MMMMMMMM     OOOOOOOOO           TTTTTTTTTTT           OOOOOOOOO     RRRRRRRR     RRRRRRR
 */
 
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////// GLOBAL VARIABLES - CONSTANTS - OVERAL SETTINGS//////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 //******Pin definitions********
 
@@ -60,7 +63,7 @@ byte speed_pwm = 0; 					//speed directly written to engine - PWM - 0-255
 //SENSORS
 
 //Speed
-int snelheid_raw = 0; 					//measured value of speed sensor 0-1023
+int speed_raw = 0; 					//measured value of speed sensor 0-1023
 
 //Collision
 int collision_raw = 0; 					//measured value of collision sensor 0-1023
@@ -79,7 +82,8 @@ const int BOTS_REF[] = {1000, 400, 220};		/*
 
 //OTHERS
 byte emergency_local = 0; 				//Local emergency level
-volatile bool emergency_COMM = false; 			//COMM emergency level
+volatile bool emergency_COMM = false; 			//COMM 	emergency level
+bool debug = false;				
 
 /*
 float OMTREK_WIEL = 0.115;
@@ -105,30 +109,28 @@ void update_sensors(){
 
 
 							//Speed sensor
-	snelheid_raw = analogRead(PIN_SPEED);
+	speed_raw = analogRead(PIN_SPEED);
 
-	//snelheid_rpm = (snelheid_raw * MAX_RPM) / 1023 ;
+	//snelheid_rpm = (speed_raw * MAX_RPM) / 1023 ;
 	//snelheid_mps = OMTREK_WIEL * (snelheid_rpm / 60) ;
 
 
- 							//Collision sensors
-	collision_raw = analogRead(PIN_COLLISION);
+	collision_raw = analogRead(PIN_COLLISION);	//Collision sensors
 
-  	  	  	  	  	  	  	//Loop through array BOTS_REF_RAW until corresponding value range is found
-	bool found = false;
+	bool found = false;				//Loop through array BOTS_REF_RAW until corresponding value range is found
+	byte counter = 0;
 
-	byte i = 0;
-	while((not found) && (i <= 2)){
-		if (collision_raw >= BOTS_REF[i]){
+	while((not found) && (counter <= 2)){
+		if (collision_raw >= BOTS_REF[counter]){
 			found = true;
 		}
 
 		else{
-			i++;
+			counter++;
 		}
 	}
 
-	switch(i){
+	switch(counter){
 		case 0:
 			collision_front = false;
 			collision_back = false;
@@ -157,7 +159,7 @@ void update_sensors(){
 
 void speed_send(bool dont_brake = true){		//Send desired speed to engines
 
-	if(dont_brake){ 				//speed_send(false) == brake
+	if(dont_brake){ 				//purpose: speed_send(false) == brake
 
 		if (direction == 0) {			//backward
 			digitalWrite(PIN_MOTOR_A, LOW);
@@ -167,16 +169,21 @@ void speed_send(bool dont_brake = true){		//Send desired speed to engines
 			digitalWrite(PIN_MOTOR_V, LOW);
 			analogWrite(PIN_MOTOR_A, speed_pwm);
 		}
+		else if (direction == 2){ 		//stand still => brake
+			digitalWrite(PIN_MOTOR_V, HIGH);
+			digitalWrite(PIN_MOTOR_A, HIGH);
+		}
+
 	}
 
-	else{ //brake
+	else{						//hard brake
 		digitalWrite(PIN_MOTOR_V, HIGH);
 		digitalWrite(PIN_MOTOR_A, HIGH);
 	}
 }
 
 
-void speed_COMM_to_speed_sens(){			//Calculate value of speed sensor corresponding to last asked speed of COMM
+void speed_COMM_to_speed_sens(){			//Calculates and updates value of speed_COMM_sens corresponding to last asked speed of COMM (speed_com_raw)
 
 	speed_COMM_sens = speed_COMM_raw * 3; 		//Value of speed sensor is linear to real speed
 							//Speed sensor must be adjusted so that max_speed = 255 * 3 (3.73volt)
@@ -185,17 +192,18 @@ void speed_COMM_to_speed_sens(){			//Calculate value of speed sensor correspondi
 
 void speed_calc() {					//Calculate desired speed written to engines
 
-	speed_COMM_to_speed_sens();
+	speed_COMM_to_speed_sens();			//Updates speed_COMM_sens
 
-	if (speed_COMM_sens == 0){ 			//brake
-		speed_send(false);
+	if (speed_COMM_sens == 0){ 			//stand still
+		speed_pwm == 0;
 	}
 
-	else if ((speed_COMM_sens > snelheid_raw) && speed_pwm > 0){
+							//decrease speed
+	else if ((speed_COMM_sens > speed_raw) && speed_pwm > 0){
 		speed_pwm--;
 	}
-
-	else if ((speed_COMM_sens < snelheid_raw) && speed_pwm < 255){
+							//increase speed
+	else if ((speed_COMM_sens < speed_raw) && speed_pwm < 255){
 		speed_pwm++;
 	}
 }
@@ -298,6 +306,7 @@ void i2c_receive(int bytes_received){
 	else if (Wire.available() == 2) {
 		direction = (byte) Wire.read();
 		speed_COMM_raw = (int) Wire.read();
+		terminal = 0;
 	}
 
 
