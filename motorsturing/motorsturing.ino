@@ -1,5 +1,6 @@
 #include <Wire.h>
-#include "P&O3.h" //comment this line for development in arduino IDE
+//#include "P&O3.h" //comment this line for development in arduino IDE
+#include <SoftwareSerial.h> //Communication with LCD
 
 /*
 MMMMMMMM               MMMMMMMM     OOOOOOOOO     TTTTTTTTTTTTTTTTTTTTTTT     OOOOOOOOO     RRRRRRRRRRRRRRRRR
@@ -43,7 +44,7 @@ const byte PIN_EM_IN = 7;
 
 //LCD
 const byte PIN_LCD = 1;
-
+SoftwareSerial lcd (4, PIN_LCD);
  	 	 	 	 	 	 	//Unused Pins, will be flagged as INPUT
 const byte UNUSED_PINS[] = {A0, A1, A2, A5, 4, 6, 8, 10, 11, 12, 13};
 const byte AMOUNT_UNUSED_PINS = 11;			//needed to loop through the above array
@@ -264,31 +265,31 @@ void emergency_local_check(){
 
 //LCD
 void setBacklight(byte brightness){
-	Serial.write(0x80);  				//send the backlight command
-	Serial.write(brightness);  			//send the brightness value
+	lcd.write(0x80);  				//send the backlight command
+	lcd.write(brightness);  			//send the brightness value
 }
 
 void clearDisplay(){
-	Serial.write(0xFE);  				//send the special command
-	Serial.write(0x01);  				//send the clear screen command
+	lcd.write(0xFE);  				//send the special command
+	lcd.write(0x01);  				//send the clear screen command
 }
 
-void setSerialCursor(byte cursor_position){
-	Serial.write(0xFE);  				//send the special command
-	Serial.write(0x80);  				//send the set cursor command
-	Serial.write(cursor_position);  		//send the cursor position
+void setlcdCursor(byte cursor_position){
+	lcd.write(0xFE);  				//send the special command
+	lcd.write(0x80);  				//send the set cursor command
+	lcd.write(cursor_position);  		//send the cursor position
 }
 
 void update_lcd(){
 	clearDisplay();
-	Serial.print("SPEED ");
-	Serial.print(speed_COMM_raw);
-	setSerialCursor(10);
-	Serial.write("m/s");
-	setSerialCursor(16);
-	Serial.print(emergency_COMM);
-	Serial.print(" ");
-	Serial.print(emergency_local);
+	lcd.print("SPEED ");
+	lcd.print(speed_COMM_raw);
+	setlcdCursor(10);
+	lcd.write("m/s");
+	setlcdCursor(16);
+	lcd.print(emergency_COMM);
+	lcd.print(" ");
+	lcd.print(emergency_local);
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////// I2C & INTERRUPT FUNCTIONS///////////////////////////////////////////
@@ -358,9 +359,9 @@ void setup() {
 	Wire.onReceive(i2c_receive); 			//read message from COMM
 
 	//Attach emergency interrupt (emergency from COMM)
-	attachInterrupt(digitalPinToInterrupt(PIN_EM_IN), emergency_COMM_isr, RISING);
+	//attachInterrupt(digitalPinToInterrupt(PIN_EM_IN), emergency_COMM_isr, RISING);
 
-	Serial.begin(1200); 				//Communication with LCD
+	lcd.begin(1200); 				//Communication with LCD
 
 	delay(2000);					//Boot time
 
@@ -386,7 +387,7 @@ void loop() {
 
 	update_lcd();
 	delay(10);
-							//stay in loop while COMM is in emergency mode
+/*							//stay in loop while COMM is in emergency mode
 	while((emergency_COMM == true) || (digitalRead(PIN_EM_IN) == HIGH)){
 
 		speed_send(false);			//brake
@@ -399,6 +400,7 @@ void loop() {
 
 	    	delay(100);
 	 }
+*/
 
 }
 
