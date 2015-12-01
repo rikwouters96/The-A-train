@@ -137,7 +137,7 @@ void setup() {
   pinMode(PIN_EMERGENCY_MOTOR, INPUT);
   pinMode(PIN_EMERGENCY_COMMUNICATION, OUTPUT);
   
-  pinMode(A1, INPUT);
+  pinMode(A1, INPUT);                           // declaring unused pins as input.
   pinMode(A2, INPUT);
   pinMode(A3, INPUT);
   pinMode(A4, INPUT);
