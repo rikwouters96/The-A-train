@@ -59,6 +59,10 @@ uint8_t D6Pin = 7;
 uint8_t D7Pin = 8;
 uint8_t BLPin = 9;
 
+ 	 	 	 	 	 	 	//Unused Pins, will be flagged as INPUT
+const byte UNUSED_PINS[] = {A0, A1, A2, A3, A4, A5, 1, 10, 11, 12, 13};
+const byte AMOUNT_UNUSED_PINS = 11;			//needed to loop through the above array
+
 char inKey;  // Character received from serial input
 uint8_t Cursor = 0;  // Position of cursor, 0 is top left, (rows*columns)-1 is bottom right
 uint8_t LCDOnOff = 1;  // 0 if LCD is off
@@ -88,6 +92,10 @@ void setup(){
   rows = 2;
   columns = 16;
  
+  for (byte i = 0; i < AMOUNT_UNUSED_PINS; i++) {	//define unused pins as input
+	pinMode(UNUSED_PINS[i], INPUT);
+	}
+
   // set up the LCD's number of rows and columns: 
   lcd.begin(columns, rows);
   
